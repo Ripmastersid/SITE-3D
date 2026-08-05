@@ -14,10 +14,6 @@
   .topo img { width:36px; height:36px; border-radius:8px; }
   .topo span { color:#fff; font-weight:bold; font-size:18px; }
   .dica { position:fixed; bottom:8px; right:12px; color:#7d92c4; font-size:11px; z-index:3; }
-  .ui { position:fixed; bottom:16px; left:16px; display:flex; gap:8px; z-index:3; flex-wrap:wrap; }
-  .ui button { padding:8px 12px; border:1px solid rgba(255,255,255,.25); border-radius:8px;
-               background:rgba(255,255,255,.08); color:#fff; cursor:pointer; font-size:12px; }
-  .ui button.ativo { background:#25D366; border-color:#25D366; color:#04220f; font-weight:bold; }
   #load { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
           color:#9db4e8; background:#050b18; z-index:5; transition:opacity .6s; }
   form { position:fixed; top:50%; right:6%; transform:translateY(-50%);
@@ -35,8 +31,6 @@
   #zap svg { width:20px; height:20px; fill:currentColor; }
   @media (max-width:768px){
     form { right:50%; top:auto; bottom:20px; transform:translateX(50%); width:min(320px,92vw); }
-    .ui  { bottom:auto; top:70px; }
-    .dica{ bottom:auto; top:112px; }
   }
 </style>
 </head>
@@ -46,14 +40,6 @@
 <div class="topo"><img src="favicon-mark.png" alt="logo"><span>sidmarkting</span></div>
 <canvas id="cena"></canvas>
 <div class="dica">1 dedo gira · 2 dedos ajusta o tamanho</div>
-
-<div class="ui">
-  <button data-anim="apontar" class="ativo">Apontar</button>
-  <button data-anim="parado">Parado</button>
-  <button data-anim="acenar">Acenar</button>
-  <button data-anim="concordar">Concordar</button>
-  <button data-anim="dancar">Dançar</button>
-</div>
 
 <form onsubmit="return false">
   <h1>Sites profissionais entre em contato</h1>
@@ -103,9 +89,10 @@ function layout(){
 }
 layout();
 
-let grupo=null, bones={}, base={}, feetY=0, animAtual='apontar';
+let grupo=null, bones={}, feetY=0;
+const SIG={E:1,D:1,cE:1,cD:1};
 
-/* ===== detecção anatômica BLINDADA: só registra junta que existir ===== */
+/* detecção anatômica por geometria (blindada) */
 function detectarRig(){
   const hp=new THREE.Vector3(); holder.getWorldPosition(hp);
   spinner.updateWorldMatrix(true,true);
@@ -113,8 +100,7 @@ function detectarRig(){
     o.getWorldPosition(v); v.sub(hp); B.push({o,v}); }});
   const alto=B.filter(b=>b.v.y>1.2);
   const maxX=alto.length?Math.max(...alto.map(b=>Math.abs(b.v.x))):0.8;
-  const setB=(k,o)=>{ if(o&&!bones[k]){ bones[k]=o; base[k]=o.rotation.clone(); } };
-
+  const setB=(k,o)=>{ if(o&&!bones[k]){ bones[k]=o; o.userData.base=o.rotation.clone(); } };
   for (const s of [1,-1]){
     const tag=s>0?'E':'D';
     const chain=B.filter(b=>b.v.y>1.2&&(s>0?b.v.x>0:b.v.x<0))
@@ -123,18 +109,31 @@ function detectarRig(){
     setB('ante'+tag,  chain.find(b=>Math.abs(b.v.x)>0.40)?.o);
     setB('mao'+tag,   chain.find(b=>Math.abs(b.v.x)>0.70*maxX)?.o);
   }
-  const pernas=B.filter(b=>b.v.y<1.0&&Math.abs(b.v.x)>0.04&&Math.abs(b.v.x)<0.35);
-  for (const s of [1,-1]){
-    const tag=s>0?'E':'D', ls=pernas.filter(b=>s>0?b.v.x>0:b.v.x<0);
-    setB('perna'+tag,  ls.find(b=>b.v.y>0.70)?.o);
-    setB('joelho'+tag, ls.find(b=>b.v.y>0.30&&b.v.y<=0.70)?.o);
-    setB('pe'+tag,     ls.find(b=>b.v.y<=0.15)?.o);
-  }
   const centro=B.filter(b=>Math.abs(b.v.x)<0.06);
   setB('head',  centro.slice().sort((a,b)=>a.v.y-b.v.y).pop()?.o);
   setB('spine', centro.find(b=>b.v.y>1.05&&b.v.y<1.50)?.o);
   setB('hips',  centro.find(b=>b.v.y>0.80&&b.v.y<=1.05)?.o);
-  console.log('🦴 Rig detectado:',Object.fromEntries(Object.entries(bones).map(([k,b])=>[k,b.name])));
+}
+
+/* calibração: testa o giro e vê se a mão DESCE — se subir, inverte o sinal */
+function teste(bone,probe,eixo,ang,comp,quer){
+  if(!bone||!probe) return 1;
+  const a=new THREE.Vector3(); probe.getWorldPosition(a);
+  bone.rotateOnWorldAxis(eixo,ang);
+  spinner.updateWorldMatrix(true,true);
+  const b=new THREE.Vector3(); probe.getWorldPosition(b);
+  const d=b[comp]-a[comp];
+  bone.rotation.copy(bone.userData.base);
+  spinner.updateWorldMatrix(true,true);
+  return (d*quer>0)?1:-1;
+}
+function calibrar(){
+  const pE=bones.maoE||bones.anteE, pD=bones.maoD||bones.anteD;
+  SIG.E = teste(bones.bracoE,pE,WZ,.4,'y',-1);  // quer a mão descendo
+  SIG.D = teste(bones.bracoD,pD,WZ,.4,'y',-1);
+  SIG.cE= teste(bones.anteE,pE,WX,.4,'z', 1);   // quer o antebraço indo pra frente
+  SIG.cD= teste(bones.anteD,pD,WX,.4,'z', 1);
+  console.log('🦴 Calibrado:',SIG);
 }
 
 const draco=new DRACOLoader().setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
@@ -147,11 +146,11 @@ new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL, gltf=>{
   grupo.position.set(-c.x*k,-box.min.y*k,-c.z*k);
   feetY=grupo.position.y;
   spinner.add(grupo);
-  try{ detectarRig(); }catch(err){ console.error('Erro no rig:',err); }
+  try{ detectarRig(); calibrar(); }catch(err){ console.error('rig:',err); }
   const ld=document.getElementById('load'); ld.style.opacity=0; setTimeout(()=>ld.remove(),700);
 }, undefined, err=>{
-  console.error('Erro ao carregar GLB:',err);
-  document.getElementById('load').textContent='Erro ao carregar o modelo 😢 confira se human-v2.glb está no repositório';
+  console.error(err);
+  document.getElementById('load').textContent='Erro ao carregar o modelo 😢';
 });
 
 /* toque: 1 dedo gira · pinça = tamanho */
@@ -170,66 +169,31 @@ cvs.addEventListener('pointermove',e=>{
 addEventListener('pointerup',e=>pts.delete(e.pointerId));
 cvs.addEventListener('wheel',e=>{userScale=THREE.MathUtils.clamp(userScale*(1-e.deltaY*.001),.35,2.5);},{passive:true});
 
-document.querySelectorAll('.ui button').forEach(b=>b.onclick=()=>{
-  animAtual=b.dataset.anim;
-  document.querySelectorAll('.ui button').forEach(x=>x.classList.remove('ativo'));
-  b.classList.add('ativo');
-});
-
+/* ===== IDLE ESTILO LOBBY (CODM): um loop só, natural, sem botões ===== */
 const clock=new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   const t=clock.getElapsedTime();
   spinner.rotation.y=userRot; spinner.scale.setScalar(userScale);
   if (grupo){
-    for (const k in bones) bones[k].rotation.copy(base[k]);
+    for (const k in bones) bones[k].rotation.copy(bones[k].userData.base);
     grupo.position.y=feetY;
 
-    /* pose de repouso: braços arriados + cotovelos levemente dobrados */
-    if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WZ,-1.30);
-    if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, 1.30);
-    if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX,-.25);
-    if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX,-.25);
+    /* braços arriados (sinais calibrados) + cotovelos relaxados */
+    if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WZ, 1.35*SIG.E);
+    if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, 1.35*SIG.D);
+    if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX, .30*SIG.cE);
+    if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX, .30*SIG.cD);
 
-    if (bones.spine) bones.spine.rotateOnWorldAxis(WX,Math.sin(t*2)*.02);
-    if (bones.head)  bones.head.rotateOnWorldAxis(WY,Math.sin(t*.7)*.05);
-
-    if (animAtual==='parado'){
-      if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX,Math.sin(t*1.6)*.03);
-      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX,Math.sin(t*1.6)*.03);
-    }
-    if (animAtual==='apontar'){
-      const bal=Math.sin(t*1.3)*.05;
-      if (bones.bracoE){bones.bracoE.rotateOnWorldAxis(WZ,1.40+bal);bones.bracoE.rotateOnWorldAxis(WX,-.12);}
-      if (bones.anteE) bones.anteE.rotateOnWorldAxis(WZ,.20);
-      if (bones.maoE)  bones.maoE.rotateOnWorldAxis(WZ,.10);
-      if (bones.head)  bones.head.rotateOnWorldAxis(WY,.35);
-      if (bones.spine) bones.spine.rotateOnWorldAxis(WY,.12);
-    }
-    if (animAtual==='acenar'){
-      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ,-1.25);
-      if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WZ,Math.sin(t*9)*.35-.15);
-      if (bones.maoD)   bones.maoD.rotateOnWorldAxis(WZ,Math.sin(t*9)*.15);
-      if (bones.head)   bones.head.rotateOnWorldAxis(WY,Math.sin(t*1.4)*.12);
-    }
-    if (animAtual==='concordar'){
-      if (bones.head)  bones.head.rotateOnWorldAxis(WX,Math.sin(t*5)*.28);
-      if (bones.spine) bones.spine.rotateOnWorldAxis(WX,Math.sin(t*5)*.07);
-    }
-    if (animAtual==='dancar'){
-      const s=Math.sin(t*4), q=Math.max(0,s), q2=Math.max(0,-s);
-      if (bones.hips)  bones.hips.rotateOnWorldAxis(WY,s*.18);
-      if (bones.spine) bones.spine.rotateOnWorldAxis(WY,-s*.10);
-      if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX,-s*.45);
-      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX, s*.45);
-      if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX,-.5);
-      if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX,-.5);
-      if (bones.pernaE) bones.pernaE.rotateOnWorldAxis(WX,-q*.35);
-      if (bones.joelhoE)bones.joelhoE.rotateOnWorldAxis(WX, q*.55);
-      if (bones.peE)    bones.peE.rotateOnWorldAxis(WX,-q*.25);
-      if (bones.pernaD) bones.pernaD.rotateOnWorldAxis(WX,-q2*.35);
-      if (bones.joelhoD)bones.joelhoD.rotateOnWorldAxis(WX, q2*.55);
-      if (bones.peD)    bones.peD.rotateOnWorldAxis(WX,-q2*.25);
-    }
+    /* respiração */
+    if (bones.spine) bones.spine.rotateOnWorldAxis(WX, Math.sin(t*1.9)*.02);
+    /* troca de peso (balanço lateral lento do quadril) */
+    if (bones.hips)  bones.hips.rotateOnWorldAxis(WZ, Math.sin(t*.5)*.025);
+    /* cabeça olhando em volta, devagar */
+    if (bones.head)  bones.head.rotateOnWorldAxis(WY, Math.sin(t*.35)*.16+Math.sin(t*.13)*.10);
+    if (bones.head)  bones.head.rotateOnWorldAxis(WX, Math.sin(t*.8)*.03);
+    /* braços acompanham a respiração, bem sutil */
+    if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX, Math.sin(t*1.9+.7)*.02);
+    if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX, Math.sin(t*1.9)*.02);
   }
   renderer.render(scene,camera);
 });
