@@ -9,7 +9,7 @@
   * { margin:0; box-sizing:border-box; }
   body { height:100vh; overflow:hidden; font-family:Arial, sans-serif;
          background:radial-gradient(circle at 50% 30%, #0b1e45, #050b18); }
-  #cena { position:fixed; inset:0; }
+  #cena { position:fixed; inset:0; touch-action:none; }
 
   /* topo: logo + nome */
   .topo { position:fixed; top:16px; left:16px; display:flex; align-items:center;
@@ -74,6 +74,7 @@
 import * as THREE from 'three';
 import { GLTFLoader }  from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 /* ============ CONFIGURAÇÃO ============ */
 const MODEL_URL = 'human-v2.glb';      // ← se renomear o arquivo, muda aqui
@@ -93,6 +94,18 @@ const luz = new THREE.DirectionalLight(0xffffff, 2);
 luz.position.set(2, 3, 2);
 scene.add(luz);
 
+/* ===== controles de toque: 1 dedo gira, pinça (2 dedos) dá zoom ===== */
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enablePan = false;              // trava só em girar + zoom, sem arrastar a câmera
+controls.minDistance = 1.8;
+controls.maxDistance = 7;
+controls.minPolarAngle = Math.PI * 0.15; // não deixa virar de cabeça pra baixo
+controls.maxPolarAngle = Math.PI * 0.62; // nem passar por baixo do chão
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: null };
+
 const S = { bracoD: 1, bracoE: 1, head: 1, hips: 1 }; // se algo ficar espelhado, troque 1 por -1
 const PROCURA = {
   hips  : ['hips','hip','pelvis'],
@@ -110,10 +123,11 @@ let grupo = null, bones = {}, base = {}, baseX = 0, baseY = 0;
 function layout(){
   const mob = innerWidth < 768;
   baseX = mob ? 0 : -1.15;
-  baseY = mob ? .75 : 0;
-  camera.position.set(0, mob ? .9 : .4, mob ? 5.4 : 4.2);
-  camera.lookAt(0, mob ? .7 : 0, 0);
-  if (grupo){ grupo.position.x = baseX; }
+  baseY = mob ? 0 : 0;
+  camera.position.set(0, mob ? 1.1 : .4, mob ? 4.6 : 4.2);
+  controls.target.set(baseX, mob ? .9 : .9, 0); // altura aproximada do peito
+  controls.update();
+  if (grupo){ grupo.position.x = baseX; grupo.position.y = baseY; }
 }
 layout();
 
@@ -160,6 +174,7 @@ renderer.setAnimationLoop(() => {
     if (bones.bracoE) bones.bracoE.rotation.z += Math.sin(t*1.6)*.04*S.bracoE;
     if (bones.bracoD) bones.bracoD.rotation.z -= Math.sin(t*1.6)*.04*S.bracoD;
   }
+  controls.update(); // necessário pro damping (suavização) do giro por toque
   renderer.render(scene, camera);
 });
 
