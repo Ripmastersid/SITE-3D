@@ -64,8 +64,9 @@ import * as THREE from 'three';
 import { GLTFLoader }  from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-const MODEL_URL='human-v2.glb', ZAP_NUM='5521966053200', DE_COSTAS=false;
-const WX=new THREE.Vector3(1,0,0), WY=new THREE.Vector3(0,1,0), WZ=new THREE.Vector3(0,0,1);
+const MODEL_URL='human-v3.glb';  // ← nome NOVO pra fugir do cache
+const ZAP_NUM='5521966053200';
+const WX=new THREE.Vector3(1,0,0), WY=new THREE.Vector3(0,1,0);
 
 const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('cena'),antialias:true,alpha:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
@@ -89,78 +90,32 @@ function layout(){
 }
 layout();
 
-let grupo=null, bones={}, feetY=0;
-const SIG={E:1,D:1,cE:1,cD:1,jE:1,jD:1};
-
-function detectarRig(){
-  const hp=new THREE.Vector3(); holder.getWorldPosition(hp);
-  spinner.updateWorldMatrix(true,true);
-  const B=[]; grupo.traverse(o=>{ if(o.isBone){ const v=new THREE.Vector3();
-    o.getWorldPosition(v); v.sub(hp); B.push({o,v}); }});
-  const alto=B.filter(b=>b.v.y>1.2);
-  const maxX=alto.length?Math.max(...alto.map(b=>Math.abs(b.v.x))):0.8;
-  const setB=(k,o)=>{ if(o&&!bones[k]){ bones[k]=o; o.userData.base=o.rotation.clone(); } };
-  for (const s of [1,-1]){
-    const tag=s>0?'E':'D';
-    const chain=B.filter(b=>b.v.y>1.2&&(s>0?b.v.x>0:b.v.x<0))
-                 .sort((a,b)=>Math.abs(a.v.x)-Math.abs(b.v.x));
-    setB('braco'+tag, chain.find(b=>Math.abs(b.v.x)>0.14&&Math.abs(b.v.x)<0.45)?.o
-                   || chain.find(b=>Math.abs(b.v.x)>0.10)?.o);
-    setB('ante'+tag,  chain.find(b=>Math.abs(b.v.x)>0.40)?.o);
-    setB('mao'+tag,   chain.find(b=>Math.abs(b.v.x)>0.70*maxX)?.o);
-  }
-  const pernas=B.filter(b=>b.v.y<1.0&&Math.abs(b.v.x)>0.04&&Math.abs(b.v.x)<0.35);
-  for (const s of [1,-1]){
-    const tag=s>0?'E':'D', ls=pernas.filter(b=>s>0?b.v.x>0:b.v.x<0);
-    setB('joelho'+tag, ls.find(b=>b.v.y>0.30&&b.v.y<=0.70)?.o);
-    setB('pe'+tag,     ls.find(b=>b.v.y<=0.15)?.o);
-  }
-  const centro=B.filter(b=>Math.abs(b.v.x)<0.06);
-  setB('head',  centro.slice().sort((a,b)=>a.v.y-b.v.y).pop()?.o);
-  setB('spine', centro.find(b=>b.v.y>1.05&&b.v.y<1.50)?.o);
-  setB('hips',  centro.find(b=>b.v.y>0.80&&b.v.y<=1.05)?.o);
-}
-
-function teste(bone,probe,eixo,ang,comp,quer){
-  if(!bone||!probe) return 1;
-  const a=new THREE.Vector3(); probe.getWorldPosition(a);
-  bone.rotateOnWorldAxis(eixo,ang);
-  spinner.updateWorldMatrix(true,true);
-  const b=new THREE.Vector3(); probe.getWorldPosition(b);
-  const d=b[comp]-a[comp];
-  bone.rotation.copy(bone.userData.base);
-  spinner.updateWorldMatrix(true,true);
-  return (d*quer>0)?1:-1;
-}
-function calibrar(){
-  const pE=bones.maoE||bones.anteE, pD=bones.maoD||bones.anteD;
-  SIG.E = teste(bones.bracoE,pE,WZ,.4,'y',-1);
-  SIG.D = teste(bones.bracoD,pD,WZ,.4,'y',-1);
-  SIG.cE= teste(bones.anteE,pE,WX,.4,'z', 1);
-  SIG.cD= teste(bones.anteD,pD,WX,.4,'z', 1);
-  SIG.jE= teste(bones.joelhoE,bones.peE,WX,.4,'z',-1);
-  SIG.jD= teste(bones.joelhoD,bones.peD,WX,.4,'z',-1);
-  console.log('🦴 Calibrado:',SIG);
-}
+let mixer=null;
 
 const draco=new DRACOLoader().setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
 new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL, gltf=>{
-  grupo=gltf.scene; if (DE_COSTAS) grupo.rotation.y=Math.PI;
-  const box=new THREE.Box3().setFromObject(grupo);
+  const modelo=gltf.scene;
+  const box=new THREE.Box3().setFromObject(modelo);
   const s=box.getSize(new THREE.Vector3()), c=box.getCenter(new THREE.Vector3());
   const k=1.8/s.y;
-  grupo.scale.setScalar(k);
-  grupo.position.set(-c.x*k,-box.min.y*k,-c.z*k);
-  feetY=grupo.position.y;
-  spinner.add(grupo);
-  try{ detectarRig(); calibrar(); }catch(err){ console.error('rig:',err); }
+  modelo.scale.setScalar(k);
+  modelo.position.set(-c.x*k,-box.min.y*k,-c.z*k);
+  spinner.add(modelo);
+
+  console.log('🎬 Animações no GLB:', gltf.animations.map(a=>a.name));
+  if (gltf.animations.length){
+    mixer=new THREE.AnimationMixer(modelo);
+    mixer.clipAction(gltf.animations[0]).play();   // toca a animação baked do Tripo
+  } else {
+    console.warn('GLB sem animação — exporte com uma animação no Tripo pra ganhar vida.');
+  }
   const ld=document.getElementById('load'); ld.style.opacity=0; setTimeout(()=>ld.remove(),700);
 }, undefined, err=>{
   console.error(err);
-  document.getElementById('load').textContent='Erro ao carregar o modelo 😢';
+  document.getElementById('load').textContent='Erro ao carregar o modelo 😢 confira se human-v3.glb subiu pro repositório';
 });
 
-/* toque */
+/* toque: 1 dedo gira · pinça = tamanho */
 let userRot=0,userScale=1; const pts=new Map(); let pinch0=0,scale0=1;
 const cvs=renderer.domElement;
 cvs.addEventListener('pointerdown',e=>{cvs.setPointerCapture(e.pointerId);
@@ -176,49 +131,12 @@ cvs.addEventListener('pointermove',e=>{
 addEventListener('pointerup',e=>pts.delete(e.pointerId));
 cvs.addEventListener('wheel',e=>{userScale=THREE.MathUtils.clamp(userScale*(1-e.deltaY*.001),.35,2.5);},{passive:true});
 
-/* ===== POSE DE PRONTIDÃO (meio-termo que não quebra a malha) ===== */
 const clock=new THREE.Clock();
 renderer.setAnimationLoop(()=>{
-  const t=clock.getElapsedTime();
-  spinner.rotation.y=userRot; spinner.scale.setScalar(userScale);
-  if (grupo){
-    for (const k in bones) bones[k].rotation.copy(bones[k].userData.base);
-    grupo.position.y=feetY;
-
-    /* braços a ~50° (ombros preservados) + cotovelos dobrados = prontidão */
-    if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WZ, .85*SIG.E);
-    if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, .85*SIG.D);
-    if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX, .35*SIG.cE);
-    if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX, .35*SIG.cD);
-    if (bones.maoE)   bones.maoE.rotateOnWorldAxis(WX, .10*SIG.cE);
-    if (bones.maoD)   bones.maoD.rotateOnWorldAxis(WX, .10*SIG.cD);
-
-    /* pernas: flexão visível + tornozelo compensa (joelho pra FRENTE) */
-    if (bones.joelhoE&&bones.peE){
-      bones.joelhoE.rotateOnWorldAxis(WX, .15*SIG.jE);
-      bones.peE.rotateOnWorldAxis(WX, -.12*SIG.jE);
-    }
-    if (bones.joelhoD&&bones.peD){
-      bones.joelhoD.rotateOnWorldAxis(WX, .15*SIG.jD);
-      bones.peD.rotateOnWorldAxis(WX, -.12*SIG.jD);
-    }
-    /* tronco levemente inclinado pra frente (postura viva) */
-    if (bones.hips)  bones.hips.rotateOnWorldAxis(WX, .05);
-    if (bones.spine) bones.spine.rotateOnWorldAxis(WX, Math.sin(t*1.9)*.035+.03);
-    /* troca de peso + quadril */
-    if (bones.hips){
-      bones.hips.rotateOnWorldAxis(WZ, Math.sin(t*.5)*.04);
-      bones.hips.rotateOnWorldAxis(WY, Math.sin(t*.3)*.05);
-    }
-    /* cabeça olhando em volta */
-    if (bones.head){
-      bones.head.rotateOnWorldAxis(WY, Math.sin(t*.4)*.22+Math.sin(t*.11)*.15);
-      bones.head.rotateOnWorldAxis(WX, Math.sin(t*.8)*.05);
-    }
-    /* braços respiram junto */
-    if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX, Math.sin(t*1.9+.7)*.035);
-    if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX, Math.sin(t*1.9)*.035);
-  }
+  const dt=clock.getDelta();
+  if (mixer) mixer.update(dt);          // ← sem isso a animação não roda
+  spinner.rotation.y=userRot;
+  spinner.scale.setScalar(userScale);
   renderer.render(scene,camera);
 });
 
