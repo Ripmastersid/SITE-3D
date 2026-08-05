@@ -105,40 +105,40 @@ layout();
 
 let grupo=null, bones={}, base={}, feetY=0, animAtual='apontar';
 
-/* ============ DETECÇÃO ANATÔMICA POR GEOMETRIA (não depende de nomes) ============
-   Proporções humanas (altura 1,8 m): ombros ~1,5 · cotovelos ~1,5 |x|~0,45 ·
-   mãos |x| máx · quadril ~0,95 · joelhos ~0,5 · pés ~0,05                       */
+/* ===== detecção anatômica BLINDADA: só registra junta que existir ===== */
 function detectarRig(){
   const hp=new THREE.Vector3(); holder.getWorldPosition(hp);
   spinner.updateWorldMatrix(true,true);
   const B=[]; grupo.traverse(o=>{ if(o.isBone){ const v=new THREE.Vector3();
     o.getWorldPosition(v); v.sub(hp); B.push({o,v}); }});
-  const maxX=Math.max(...B.filter(b=>b.v.y>1.2).map(b=>Math.abs(b.v.x)));
+  const alto=B.filter(b=>b.v.y>1.2);
+  const maxX=alto.length?Math.max(...alto.map(b=>Math.abs(b.v.x))):0.8;
+  const setB=(k,o)=>{ if(o&&!bones[k]){ bones[k]=o; base[k]=o.rotation.clone(); } };
+
   for (const s of [1,-1]){
     const tag=s>0?'E':'D';
     const chain=B.filter(b=>b.v.y>1.2&&(s>0?b.v.x>0:b.v.x<0))
                  .sort((a,b)=>Math.abs(a.v.x)-Math.abs(b.v.x));
-    bones['braco'+tag]=chain.find(b=>Math.abs(b.v.x)>0.10)?.o;  // ombro
-    bones['ante'+tag] =chain.find(b=>Math.abs(b.v.x)>0.40)?.o;  // cotovelo
-    bones['mao'+tag]  =chain.find(b=>Math.abs(b.v.x)>0.70*maxX)?.o; // punho
+    setB('braco'+tag, chain.find(b=>Math.abs(b.v.x)>0.10)?.o);
+    setB('ante'+tag,  chain.find(b=>Math.abs(b.v.x)>0.40)?.o);
+    setB('mao'+tag,   chain.find(b=>Math.abs(b.v.x)>0.70*maxX)?.o);
   }
   const pernas=B.filter(b=>b.v.y<1.0&&Math.abs(b.v.x)>0.04&&Math.abs(b.v.x)<0.35);
   for (const s of [1,-1]){
     const tag=s>0?'E':'D', ls=pernas.filter(b=>s>0?b.v.x>0:b.v.x<0);
-    bones['perna'+tag]  =ls.find(b=>b.v.y>0.70)?.o;   // quadril/coxa
-    bones['joelho'+tag] =ls.find(b=>b.v.y>0.30&&b.v.y<=0.70)?.o;
-    bones['pe'+tag]     =ls.find(b=>b.v.y<=0.15)?.o;
+    setB('perna'+tag,  ls.find(b=>b.v.y>0.70)?.o);
+    setB('joelho'+tag, ls.find(b=>b.v.y>0.30&&b.v.y<=0.70)?.o);
+    setB('pe'+tag,     ls.find(b=>b.v.y<=0.15)?.o);
   }
   const centro=B.filter(b=>Math.abs(b.v.x)<0.06);
-  bones.head =centro.slice().sort((a,b)=>a.v.y-b.v.y).pop()?.o;
-  bones.spine=centro.find(b=>b.v.y>1.05&&b.v.y<1.50)?.o;
-  bones.hips =centro.find(b=>b.v.y>0.80&&b.v.y<=1.05)?.o;
-  for (const k in bones) base[k]=bones[k].rotation.clone();
+  setB('head',  centro.slice().sort((a,b)=>a.v.y-b.v.y).pop()?.o);
+  setB('spine', centro.find(b=>b.v.y>1.05&&b.v.y<1.50)?.o);
+  setB('hips',  centro.find(b=>b.v.y>0.80&&b.v.y<=1.05)?.o);
   console.log('🦴 Rig detectado:',Object.fromEntries(Object.entries(bones).map(([k,b])=>[k,b.name])));
 }
 
 const draco=new DRACOLoader().setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
-new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL,gltf=>{
+new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL, gltf=>{
   grupo=gltf.scene; if (DE_COSTAS) grupo.rotation.y=Math.PI;
   const box=new THREE.Box3().setFromObject(grupo);
   const s=box.getSize(new THREE.Vector3()), c=box.getCenter(new THREE.Vector3());
@@ -147,8 +147,11 @@ new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL,gltf=>{
   grupo.position.set(-c.x*k,-box.min.y*k,-c.z*k);
   feetY=grupo.position.y;
   spinner.add(grupo);
-  detectarRig();
+  try{ detectarRig(); }catch(err){ console.error('Erro no rig:',err); }
   const ld=document.getElementById('load'); ld.style.opacity=0; setTimeout(()=>ld.remove(),700);
+}, undefined, err=>{
+  console.error('Erro ao carregar GLB:',err);
+  document.getElementById('load').textContent='Erro ao carregar o modelo 😢 confira se human-v2.glb está no repositório';
 });
 
 /* toque: 1 dedo gira · pinça = tamanho */
@@ -179,15 +182,14 @@ renderer.setAnimationLoop(()=>{
   spinner.rotation.y=userRot; spinner.scale.setScalar(userScale);
   if (grupo){
     for (const k in bones) bones[k].rotation.copy(base[k]);
-    grupo.position.y=feetY; // pés no chão, sempre
+    grupo.position.y=feetY;
 
-    /* POSE DE REPOUSO ANATÔMICA: braços arriados (adução ~75°) + cotovelo ~15° */
+    /* pose de repouso: braços arriados + cotovelos levemente dobrados */
     if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WZ,-1.30);
     if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, 1.30);
     if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX,-.25);
     if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX,-.25);
 
-    /* vida: respiração + micro-olhar */
     if (bones.spine) bones.spine.rotateOnWorldAxis(WX,Math.sin(t*2)*.02);
     if (bones.head)  bones.head.rotateOnWorldAxis(WY,Math.sin(t*.7)*.05);
 
@@ -195,7 +197,6 @@ renderer.setAnimationLoop(()=>{
       if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX,Math.sin(t*1.6)*.03);
       if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX,Math.sin(t*1.6)*.03);
     }
-
     if (animAtual==='apontar'){
       const bal=Math.sin(t*1.3)*.05;
       if (bones.bracoE){bones.bracoE.rotateOnWorldAxis(WZ,1.40+bal);bones.bracoE.rotateOnWorldAxis(WX,-.12);}
@@ -204,34 +205,30 @@ renderer.setAnimationLoop(()=>{
       if (bones.head)  bones.head.rotateOnWorldAxis(WY,.35);
       if (bones.spine) bones.spine.rotateOnWorldAxis(WY,.12);
     }
-
     if (animAtual==='acenar'){
       if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ,-1.25);
       if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WZ,Math.sin(t*9)*.35-.15);
       if (bones.maoD)   bones.maoD.rotateOnWorldAxis(WZ,Math.sin(t*9)*.15);
       if (bones.head)   bones.head.rotateOnWorldAxis(WY,Math.sin(t*1.4)*.12);
     }
-
     if (animAtual==='concordar'){
       if (bones.head)  bones.head.rotateOnWorldAxis(WX,Math.sin(t*5)*.28);
       if (bones.spine) bones.spine.rotateOnWorldAxis(WX,Math.sin(t*5)*.07);
     }
-
     if (animAtual==='dancar'){
       const s=Math.sin(t*4), q=Math.max(0,s), q2=Math.max(0,-s);
       if (bones.hips)  bones.hips.rotateOnWorldAxis(WY,s*.18);
       if (bones.spine) bones.spine.rotateOnWorldAxis(WY,-s*.10);
-      if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX,-s*.45); // braços balançam
-      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX, s*.45); // oposto às pernas
+      if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX,-s*.45);
+      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX, s*.45);
       if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX,-.5);
       if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX,-.5);
-      if (bones.pernaE) bones.pernaE.rotateOnWorldAxis(WX,-q*.35);  // joelho sobe
-      if (bones.joelhoE)bones.joelhoE.rotateOnWorldAxis(WX, q*.55); // canela dobra
+      if (bones.pernaE) bones.pernaE.rotateOnWorldAxis(WX,-q*.35);
+      if (bones.joelhoE)bones.joelhoE.rotateOnWorldAxis(WX, q*.55);
       if (bones.peE)    bones.peE.rotateOnWorldAxis(WX,-q*.25);
       if (bones.pernaD) bones.pernaD.rotateOnWorldAxis(WX,-q2*.35);
       if (bones.joelhoD)bones.joelhoD.rotateOnWorldAxis(WX, q2*.55);
       if (bones.peD)    bones.peD.rotateOnWorldAxis(WX,-q2*.25);
-      /* SEM flutuar: o corpo NÃO sobe — só o pé que levanta */
     }
   }
   renderer.render(scene,camera);
