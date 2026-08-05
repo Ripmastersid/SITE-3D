@@ -64,9 +64,8 @@ import * as THREE from 'three';
 import { GLTFLoader }  from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-const MODEL_URL='human-v3.glb';  // ← nome NOVO pra fugir do cache
+const MODEL_URL='human-v3.glb';
 const ZAP_NUM='5521966053200';
-const WX=new THREE.Vector3(1,0,0), WY=new THREE.Vector3(0,1,0);
 
 const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('cena'),antialias:true,alpha:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
@@ -83,6 +82,9 @@ sombra.rotation.x=-Math.PI/2; sombra.position.y=.01;
 
 const holder=new THREE.Group(), spinner=new THREE.Group();
 holder.add(spinner); spinner.add(sombra); scene.add(holder);
+
+let character=null, mixer=null, baseY=0;
+
 function layout(){
   holder.position.x = innerWidth<768 ? 0 : -1.15;
   camera.position.set(0,1.35, innerWidth<768 ? 6.4 : 5.2);
@@ -90,29 +92,26 @@ function layout(){
 }
 layout();
 
-let mixer=null;
-
 const draco=new DRACOLoader().setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
 new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL, gltf=>{
-  const modelo=gltf.scene;
-  const box=new THREE.Box3().setFromObject(modelo);
+  character=gltf.scene;
+  const box=new THREE.Box3().setFromObject(character);
   const s=box.getSize(new THREE.Vector3()), c=box.getCenter(new THREE.Vector3());
   const k=1.8/s.y;
-  modelo.scale.setScalar(k);
-  modelo.position.set(-c.x*k,-box.min.y*k,-c.z*k);
-  spinner.add(modelo);
+  character.scale.setScalar(k);
+  character.position.set(-c.x*k,-box.min.y*k,-c.z*k);
+  baseY=character.position.y;
+  spinner.add(character);
 
   console.log('🎬 Animações no GLB:', gltf.animations.map(a=>a.name));
   if (gltf.animations.length){
-    mixer=new THREE.AnimationMixer(modelo);
-    mixer.clipAction(gltf.animations[0]).play();   // toca a animação baked do Tripo
-  } else {
-    console.warn('GLB sem animação — exporte com uma animação no Tripo pra ganhar vida.');
+    mixer=new THREE.AnimationMixer(character);
+    mixer.clipAction(gltf.animations[0]).play();
   }
   const ld=document.getElementById('load'); ld.style.opacity=0; setTimeout(()=>ld.remove(),700);
 }, undefined, err=>{
   console.error(err);
-  document.getElementById('load').textContent='Erro ao carregar o modelo 😢 confira se human-v3.glb subiu pro repositório';
+  document.getElementById('load').textContent='Erro ao carregar o modelo 😢';
 });
 
 /* toque: 1 dedo gira · pinça = tamanho */
@@ -134,7 +133,20 @@ cvs.addEventListener('wheel',e=>{userScale=THREE.MathUtils.clamp(userScale*(1-e.
 const clock=new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   const dt=clock.getDelta();
-  if (mixer) mixer.update(dt);          // ← sem isso a animação não roda
+  const elapsed=clock.getElapsedTime();
+  
+  if (mixer) mixer.update(dt);
+  
+  if (character){
+    // Rotação automática lenta (efeito vitrine)
+    character.rotation.y = elapsed * 0.3;  // velocidade ajustada
+    
+    // Flutuação sutil (só se NÃO tiver animação baked)
+    if (!mixer){
+      character.position.y = baseY + Math.sin(elapsed * 1.2) * 0.03;
+    }
+  }
+  
   spinner.rotation.y=userRot;
   spinner.scale.setScalar(userScale);
   renderer.render(scene,camera);
