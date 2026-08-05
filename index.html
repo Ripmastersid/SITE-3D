@@ -100,13 +100,14 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.enablePan = false;              // trava só em girar + zoom, sem arrastar a câmera
 controls.minDistance = 1.8;
-controls.maxDistance = 7;
+controls.maxDistance = 10;
 controls.minPolarAngle = Math.PI * 0.15; // não deixa virar de cabeça pra baixo
 controls.maxPolarAngle = Math.PI * 0.62; // nem passar por baixo do chão
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: null };
 
 const S = { bracoD: 1, bracoE: 1, head: 1, hips: 1 }; // se algo ficar espelhado, troque 1 por -1
+const BRACO_BAIXO = 1.15; // radianos: quanto os braços descem do T-pose. Se subirem em vez de descer, troque pra -1.15
 const PROCURA = {
   hips  : ['hips','hip','pelvis'],
   spine : ['spine1','spine2','chest','spine','torso'],
@@ -124,7 +125,7 @@ function layout(){
   const mob = innerWidth < 768;
   baseX = mob ? 0 : -1.15;
   baseY = mob ? 0 : 0;
-  camera.position.set(0, mob ? 1.1 : .4, mob ? 4.6 : 4.2);
+  camera.position.set(0, mob ? 1.3 : .6, mob ? 6.5 : 5.5);
   controls.target.set(baseX, mob ? .9 : .9, 0); // altura aproximada do peito
   controls.update();
   if (grupo){ grupo.position.x = baseX; grupo.position.y = baseY; }
@@ -152,6 +153,11 @@ new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL, gltf => {
       const b = todos.find(b => norm(b.name).includes(cd));
       if (b){ bones[k] = b; base[k] = b.rotation.clone(); break; }
     }
+
+  // Baixa os braços do T-pose (aplicado uma vez na pose de descanso)
+  if (base.bracoE) base.bracoE.z += BRACO_BAIXO * S.bracoE;
+  if (base.bracoD) base.bracoD.z -= BRACO_BAIXO * S.bracoD;
+
   const ld = document.getElementById('load');
   ld.style.opacity = 0; setTimeout(() => ld.remove(), 700);
 });
