@@ -10,38 +10,28 @@
   body { height:100vh; overflow:hidden; font-family:Arial, sans-serif;
          background:radial-gradient(circle at 50% 30%, #0b1e45, #050b18); }
   #cena { position:fixed; inset:0; }
-
-  /* topo: logo + nome */
-  .topo { position:fixed; top:16px; left:16px; display:flex; align-items:center;
-          gap:10px; z-index:3; }
+  .topo { position:fixed; top:16px; left:16px; display:flex; align-items:center; gap:10px; z-index:3; }
   .topo img { width:36px; height:36px; border-radius:8px; }
-  .topo span { color:#fff; font-weight:bold; font-size:18px; letter-spacing:.5px; }
-
-  /* botões de animação */
-  .ui { position:fixed; bottom:16px; left:16px; display:flex; gap:8px; z-index:3; }
+  .topo span { color:#fff; font-weight:bold; font-size:18px; }
+  .ui { position:fixed; bottom:16px; left:16px; display:flex; gap:8px; z-index:3; flex-wrap:wrap; }
   .ui button { padding:8px 12px; border:1px solid rgba(255,255,255,.25); border-radius:8px;
                background:rgba(255,255,255,.08); color:#fff; cursor:pointer; font-size:12px; }
   .ui button.ativo { background:#25D366; border-color:#25D366; color:#04220f; font-weight:bold; }
-
-  /* carregando */
   #load { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
           color:#9db4e8; background:#050b18; z-index:5; transition:opacity .6s; }
-
-  /* formulário */
-  form { position:fixed; top:50%; right:8%; transform:translateY(-50%);
+  form { position:fixed; top:50%; right:6%; transform:translateY(-50%);
          width:300px; display:flex; flex-direction:column; gap:10px;
          background:rgba(255,255,255,.07); backdrop-filter:blur(12px);
          border:1px solid rgba(255,255,255,.15); padding:26px; border-radius:14px; z-index:2; }
   form h1 { color:#fff; font-size:19px; text-align:center; margin-bottom:6px; }
   input { padding:12px; border:none; border-radius:8px; background:rgba(255,255,255,.92); }
-  #zap { display:flex; align-items:center; justify-content:center; gap:8px;
-         padding:12px; border:none; border-radius:8px; font-weight:bold; font-size:15px;
+  #zap { display:flex; align-items:center; justify-content:center; gap:8px; padding:12px;
+         border:none; border-radius:8px; font-weight:bold; font-size:15px;
          background:#3a4358; color:#8b93a8; cursor:not-allowed; transition:.3s; }
   #zap.ativo { background:#25D366; color:#04220f; cursor:pointer;
                box-shadow:0 0 18px #25D36699; animation:pulsa 1.6s infinite; }
   @keyframes pulsa { 50% { box-shadow:0 0 30px #25D366cc; } }
   #zap svg { width:20px; height:20px; fill:currentColor; }
-
   @media (max-width:768px){
     form { right:50%; top:auto; bottom:20px; transform:translateX(50%); width:min(320px,92vw); }
   }
@@ -50,16 +40,12 @@
 <body>
 
 <div id="load">Carregando personagem…</div>
-
-<div class="topo">
-  <img src="favicon-mark.png" alt="logo">
-  <span>sidmarkting</span>
-</div>
-
+<div class="topo"><img src="favicon-mark.png" alt="logo"><span>sidmarkting</span></div>
 <canvas id="cena"></canvas>
 
 <div class="ui">
-  <button data-anim="idle" class="ativo">Parado</button>
+  <button data-anim="apontar" class="ativo">Apontar</button>
+  <button data-anim="parado">Parado</button>
   <button data-anim="acenar">Acenar</button>
   <button data-anim="concordar">Concordar</button>
   <button data-anim="dancar">Dançar</button>
@@ -88,141 +74,145 @@ import * as THREE from 'three';
 import { GLTFLoader }  from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-/* ============ CONFIGURAÇÃO ============ */
-const MODEL_URL = 'human-v2.glb';      // ← se renomear o arquivo, muda aqui
-const ZAP_NUM   = '5521966053200';     // 21 96605-3200
-/* ====================================== */
+/* ================= CONFIGURAÇÃO ================= */
+const MODEL_URL = 'human-v2.glb';
+const ZAP_NUM   = '5521966053200';
+const ZOOM      = 1.9;   // 1 = encaixado na tela · 1.9 = ~55% menor · aumente p/ afastar mais
+const X_DESKTOP = -1.15; // deslocamento lateral do personagem
+const DE_COSTAS = false; // true se ele aparecer de costas
+/* ================================================ */
 
-const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('cena'),
-                                           antialias:true, alpha:true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const WX = new THREE.Vector3(1,0,0), WY = new THREE.Vector3(0,1,0), WZ = new THREE.Vector3(0,0,1);
+
+const renderer = new THREE.WebGLRenderer({ canvas:document.getElementById('cena'), antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 
 const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, .1, 100);
-
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, .1, 200);
 scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x0a1230, 2.2));
-const luz = new THREE.DirectionalLight(0xffffff, 2);
-luz.position.set(2, 3, 2);
-scene.add(luz);
+const luz = new THREE.DirectionalLight(0xffffff, 2); luz.position.set(2,3,2); scene.add(luz);
 
-const S = { bracoD: 1, bracoE: 1, head: 1, hips: 1 }; // se algo ficar espelhado, troque 1 por -1
+/* mapa de juntas — ombro, cotovelo, punho("minhoca"), quadril, joelho, pé */
 const PROCURA = {
-  hips  : ['hips','hip','pelvis'],
-  spine : ['spine1','spine2','chest','spine','torso'],
-  head  : ['head','neck'],
-  bracoE: ['leftarm','leftshoulder','left_arm','arm_l','l_arm'],
-  anteE : ['leftforearm','leftlowerarm','leftelbow','forearm_l'],
-  bracoD: ['rightarm','rightshoulder','right_arm','arm_r','r_arm'],
-  anteD : ['rightforearm','rightlowerarm','rightelbow','forearm_r'],
+  hips:['hips','hip','pelvis'], spine:['spine1','spine2','chest','spine','torso'], head:['head','neck'],
+  bracoE:['leftarm','leftshoulder','arm_l','l_arm'], anteE:['leftforearm','leftlowerarm','leftelbow','forearm_l'],
+  maoE:['lefthand','leftwrist','hand_l'],
+  bracoD:['rightarm','rightshoulder','arm_r','r_arm'], anteD:['rightforearm','rightlowerarm','rightelbow','forearm_r'],
+  maoD:['righthand','rightwrist','hand_r'],
+  pernaE:['leftupleg','leftthigh','thigh_l'], joelhoE:['leftleg','leftshin','leftcalf','shin_l'],
+  peE:['leftfoot','foot_l'],
+  pernaD:['rightupleg','rightthigh','thigh_r'], joelhoD:['rightleg','rightshin','rightcalf','shin_r'],
+  peD:['rightfoot','foot_r'],
 };
 const norm = n => n.toLowerCase().replace(/[^a-z]/g,'');
+let grupo=null, bones={}, base={}, animAtual='apontar', centroY=0;
 
-let grupo = null, bones = {}, base = {}, baseX = 0, baseY = 0, animAtual = 'idle';
-
-function layout(){
+function enquadrar(){
+  if (!grupo) return;
+  const esp = new THREE.Box3().setFromObject(grupo).getBoundingSphere(new THREE.Sphere());
+  centroY = esp.center.y;
+  const dist = esp.radius / Math.tan(THREE.MathUtils.degToRad(camera.fov/2)) * ZOOM;
   const mob = innerWidth < 768;
-  baseX = mob ? 0 : -1.15;
-  baseY = mob ? .75 : 0;
-  camera.position.set(0, mob ? .9 : .4, mob ? 5.4 : 4.2);
-  camera.lookAt(0, mob ? .7 : 0, 0);
-  if (grupo){ grupo.position.x = baseX; }
+  grupo.position.x = mob ? 0 : X_DESKTOP;
+  camera.position.set(0, centroY + (mob ? .3 : 0), dist);
+  camera.lookAt(0, centroY, 0);
 }
-layout();
 
 const draco = new DRACOLoader().setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
 new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL, gltf => {
-  const modelo = gltf.scene;
-  const box = new THREE.Box3().setFromObject(modelo);
-  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
-  modelo.position.sub(c);
-  grupo = new THREE.Group();
-  grupo.add(modelo);
-  grupo.scale.setScalar(1.8 / Math.max(s.x, s.y, s.z));
-  grupo.position.x = baseX; grupo.position.y = baseY;
+  grupo = gltf.scene;
+  if (DE_COSTAS) grupo.rotation.y = Math.PI;
   scene.add(grupo);
-  // grupo.rotation.y = Math.PI; // descomente se ele ficar de costas
-
-  const todos = [];
-  grupo.traverse(o => { if (o.isBone) todos.push(o); });
-  console.log('🦴 Bones:', todos.map(b => b.name)); // cola aqui pra eu calibrar
-  for (const [k, cands] of Object.entries(PROCURA))
-    for (const cd of cands){
-      const b = todos.find(b => norm(b.name).includes(cd));
-      if (b){ bones[k] = b; base[k] = b.rotation.clone(); break; }
-    }
-  const ld = document.getElementById('load');
-  ld.style.opacity = 0; setTimeout(() => ld.remove(), 700);
+  const todos=[]; grupo.traverse(o=>{ if(o.isBone) todos.push(o); });
+  console.log('🦴 Bones:', todos.map(b=>b.name)); // cola aqui pra calibração fina
+  for (const [k,cands] of Object.entries(PROCURA))
+    for (const cd of cands){ const b=todos.find(b=>norm(b.name).includes(cd));
+      if (b){ bones[k]=b; base[k]=b.rotation.clone(); break; } }
+  enquadrar();
+  const ld=document.getElementById('load'); ld.style.opacity=0; setTimeout(()=>ld.remove(),700);
 });
 
-document.querySelectorAll('.ui button').forEach(btn => btn.onclick = () => {
-  animAtual = btn.dataset.anim;
-  document.querySelectorAll('.ui button').forEach(b => b.classList.remove('ativo'));
-  btn.classList.add('ativo');
+document.querySelectorAll('.ui button').forEach(b=>b.onclick=()=>{
+  animAtual=b.dataset.anim;
+  document.querySelectorAll('.ui button').forEach(x=>x.classList.remove('ativo'));
+  b.classList.add('ativo');
 });
 
-const clock = new THREE.Clock();
-renderer.setAnimationLoop(() => {
-  const t = clock.getElapsedTime();
+const clock=new THREE.Clock();
+renderer.setAnimationLoop(()=>{
+  const t=clock.getElapsedTime();
   if (grupo){
-    for (const k in bones) bones[k].rotation.copy(base[k]);
-    if (bones.spine) bones.spine.rotation.x += Math.sin(t*2)*.03;
-    if (bones.head)  bones.head.rotation.y  += Math.sin(t*.7)*.06;
-    grupo.position.y = baseY + Math.sin(t*2)*.02;
+    for (const k in bones) bones[k].rotation.copy(base[k]);   // volta à pose base
 
-    if (animAtual==='idle'){
-      if (bones.bracoE) bones.bracoE.rotation.z += Math.sin(t*1.6)*.04*S.bracoE;
-      if (bones.bracoD) bones.bracoD.rotation.z -= Math.sin(t*1.6)*.04*S.bracoD;
+    /* vida constante: respiração + olhar passeando */
+    if (bones.spine) bones.spine.rotateOnWorldAxis(WX, Math.sin(t*2)*.03);
+    if (bones.head)  bones.head.rotateOnWorldAxis(WY, Math.sin(t*.7)*.05);
+    grupo.position.y = Math.sin(t*2)*.015;
+
+    if (animAtual==='parado'){
+      if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WZ,  Math.sin(t*1.6)*.04);
+      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, -Math.sin(t*1.6)*.04);
     }
+
+    if (animAtual==='apontar'){                               // 👉 aponta pro formulário
+      const bal=Math.sin(t*1.3)*.05;
+      if (bones.bracoE){ bones.bracoE.rotateOnWorldAxis(WZ, .95+bal); bones.bracoE.rotateOnWorldAxis(WX, -.15); }
+      if (bones.anteE)   bones.anteE.rotateOnWorldAxis(WZ, .25);
+      if (bones.maoE)    bones.maoE.rotateOnWorldAxis(WZ, .1);      // punho esticado
+      if (bones.head)    bones.head.rotateOnWorldAxis(WY, .35);     // olha pro form
+      if (bones.spine)   bones.spine.rotateOnWorldAxis(WY, .12);    // tronco acompanha
+    }
+
     if (animAtual==='acenar'){
-      if (bones.bracoD){ bones.bracoD.rotation.z += -2.1*S.bracoD + Math.sin(t*9)*.2*S.bracoD; }
-      if (bones.anteD)  bones.anteD.rotation.z  += Math.sin(t*9)*.45*S.bracoD;
+      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, -1.7);
+      if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WZ, Math.sin(t*9)*.35 - .2);
+      if (bones.maoD)   bones.maoD.rotateOnWorldAxis(WZ, Math.sin(t*9)*.15);
     }
+
     if (animAtual==='concordar')
-      if (bones.head) bones.head.rotation.x += Math.sin(t*6)*.25*S.head;
+      if (bones.head) bones.head.rotateOnWorldAxis(WX, Math.sin(t*5)*.3);
+
     if (animAtual==='dancar'){
-      const s2 = Math.sin(t*4);
-      if (bones.hips)   bones.hips.rotation.y   += s2*.15*S.hips;
-      if (bones.bracoE) bones.bracoE.rotation.x += s2*.5;
-      if (bones.bracoD) bones.bracoD.rotation.x -= s2*.5;
-      grupo.position.y = baseY + Math.abs(Math.sin(t*4))*.05;
+      const s=Math.sin(t*4), q=Math.max(0,s), q2=Math.max(0,-s);
+      if (bones.hips)  bones.hips.rotateOnWorldAxis(WY, s*.2);
+      if (bones.spine) bones.spine.rotateOnWorldAxis(WY, -s*.1);
+      if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX, s*.7);
+      if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX, -s*.7);
+      if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX, -.6);   // cotovelo dobrado
+      if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX, -.6);
+      if (bones.pernaE) bones.pernaE.rotateOnWorldAxis(WX, -q*.4);   // joelho sobe
+      if (bones.joelhoE)bones.joelhoE.rotateOnWorldAxis(WX,  q*.6);  // canela dobra
+      if (bones.pernaD) bones.pernaD.rotateOnWorldAxis(WX, -q2*.4);
+      if (bones.joelhoD)bones.joelhoD.rotateOnWorldAxis(WX,  q2*.6);
+      grupo.position.y = Math.abs(Math.sin(t*4))*.06;
     }
   }
   renderer.render(scene, camera);
 });
 
-addEventListener('resize', () => {
-  camera.aspect = innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-  layout();
+addEventListener('resize', ()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); enquadrar();
 });
 
-/* ===== formulário + WhatsApp ===== */
-const nome = document.getElementById('nome'),
-      cel  = document.getElementById('cel'),
-      mail = document.getElementById('email'),
-      zap  = document.getElementById('zap');
-
-cel.addEventListener('input', () => {           // máscara (21) 99999-9999
-  let d = cel.value.replace(/\D/g,'').slice(0,11);
-  if (d.length > 6)      d = `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
-  else if (d.length > 2) d = `(${d.slice(0,2)}) ${d.slice(2)}`;
-  cel.value = d;
+/* ===== formulário + WhatsApp (igual, porque já estava perfeito) ===== */
+const nome=document.getElementById('nome'), cel=document.getElementById('cel'),
+      mail=document.getElementById('email'), zap=document.getElementById('zap');
+cel.addEventListener('input', ()=>{
+  let d=cel.value.replace(/\D/g,'').slice(0,11);
+  if (d.length>6) d=`(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  else if (d.length>2) d=`(${d.slice(0,2)}) ${d.slice(2)}`;
+  cel.value=d;
 });
-
 function valida(){
-  const ok = nome.value.trim().length >= 2
-          && cel.value.replace(/\D/g,'').length >= 10
-          && /.+@.+\..+/.test(mail.value);
-  zap.disabled = !ok;
-  zap.classList.toggle('ativo', ok);
+  const ok = nome.value.trim().length>=2 && cel.value.replace(/\D/g,'').length>=10 && /.+@.+\..+/.test(mail.value);
+  zap.disabled=!ok; zap.classList.toggle('ativo',ok);
 }
-[nome, cel, mail].forEach(i => i.addEventListener('input', valida));
-
-zap.onclick = () => {
+[nome,cel,mail].forEach(i=>i.addEventListener('input',valida));
+zap.onclick=()=>{
   if (zap.disabled) return;
-  const msg = `Olá! Meu nome é ${nome.value}. 📧 ${mail.value} | 📱 ${cel.value}. Quero um site profissional!`;
+  const msg=`Olá! Meu nome é ${nome.value}. 📧 ${mail.value} | 📱 ${cel.value}. Quero um site profissional!`;
   window.open(`https://wa.me/${ZAP_NUM}?text=${encodeURIComponent(msg)}`);
 };
 </script>
