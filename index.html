@@ -100,12 +100,10 @@ function detectarRig(){
   const alto=B.filter(b=>b.v.y>1.2);
   const maxX=alto.length?Math.max(...alto.map(b=>Math.abs(b.v.x))):0.8;
   const setB=(k,o)=>{ if(o&&!bones[k]){ bones[k]=o; o.userData.base=o.rotation.clone(); } };
-
   for (const s of [1,-1]){
     const tag=s>0?'E':'D';
     const chain=B.filter(b=>b.v.y>1.2&&(s>0?b.v.x>0:b.v.x<0))
                  .sort((a,b)=>Math.abs(a.v.x)-Math.abs(b.v.x));
-    /* ÚMERO: osso do meio do braço (não a clavícula!) */
     setB('braco'+tag, chain.find(b=>Math.abs(b.v.x)>0.14&&Math.abs(b.v.x)<0.45)?.o
                    || chain.find(b=>Math.abs(b.v.x)>0.10)?.o);
     setB('ante'+tag,  chain.find(b=>Math.abs(b.v.x)>0.40)?.o);
@@ -123,7 +121,6 @@ function detectarRig(){
   setB('hips',  centro.find(b=>b.v.y>0.80&&b.v.y<=1.05)?.o);
 }
 
-/* calibração: gira de mentirinha e confere o efeito real no osso-filho */
 function teste(bone,probe,eixo,ang,comp,quer){
   if(!bone||!probe) return 1;
   const a=new THREE.Vector3(); probe.getWorldPosition(a);
@@ -137,11 +134,11 @@ function teste(bone,probe,eixo,ang,comp,quer){
 }
 function calibrar(){
   const pE=bones.maoE||bones.anteE, pD=bones.maoD||bones.anteD;
-  SIG.E = teste(bones.bracoE,pE,WZ,.4,'y',-1);   // mão desce
+  SIG.E = teste(bones.bracoE,pE,WZ,.4,'y',-1);
   SIG.D = teste(bones.bracoD,pD,WZ,.4,'y',-1);
-  SIG.cE= teste(bones.anteE,pE,WX,.4,'z', 1);    // antebraço vai pra frente
+  SIG.cE= teste(bones.anteE,pE,WX,.4,'z', 1);
   SIG.cD= teste(bones.anteD,pD,WX,.4,'z', 1);
-  SIG.jE= teste(bones.joelhoE,bones.peE,WX,.4,'z',-1); // canela vai pra trás (joelho dobra pra frente)
+  SIG.jE= teste(bones.joelhoE,bones.peE,WX,.4,'z',-1);
   SIG.jD= teste(bones.joelhoD,bones.peD,WX,.4,'z',-1);
   console.log('🦴 Calibrado:',SIG);
 }
@@ -163,7 +160,7 @@ new GLTFLoader().setDRACOLoader(draco).load(MODEL_URL, gltf=>{
   document.getElementById('load').textContent='Erro ao carregar o modelo 😢';
 });
 
-/* toque: 1 dedo gira · pinça = tamanho */
+/* toque */
 let userRot=0,userScale=1; const pts=new Map(); let pinch0=0,scale0=1;
 const cvs=renderer.domElement;
 cvs.addEventListener('pointerdown',e=>{cvs.setPointerCapture(e.pointerId);
@@ -179,7 +176,7 @@ cvs.addEventListener('pointermove',e=>{
 addEventListener('pointerup',e=>pts.delete(e.pointerId));
 cvs.addEventListener('wheel',e=>{userScale=THREE.MathUtils.clamp(userScale*(1-e.deltaY*.001),.35,2.5);},{passive:true});
 
-/* ===== IDLE LOBBY (visível agora) ===== */
+/* ===== POSE DE PRONTIDÃO (meio-termo que não quebra a malha) ===== */
 const clock=new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   const t=clock.getElapsedTime();
@@ -188,28 +185,37 @@ renderer.setAnimationLoop(()=>{
     for (const k in bones) bones[k].rotation.copy(bones[k].userData.base);
     grupo.position.y=feetY;
 
-    /* A-pose natural: braços arriados mas fora do tronco */
-    if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WZ, 1.15*SIG.E);
-    if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, 1.15*SIG.D);
-    if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX, .22*SIG.cE);
-    if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX, .22*SIG.cD);
-    /* joelhos: microflexão pra não parecerem virados pra trás */
-    if (bones.joelhoE) bones.joelhoE.rotateOnWorldAxis(WX, .07*SIG.jE);
-    if (bones.joelhoD) bones.joelhoD.rotateOnWorldAxis(WX, .07*SIG.jD);
+    /* braços a ~50° (ombros preservados) + cotovelos dobrados = prontidão */
+    if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WZ, .85*SIG.E);
+    if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WZ, .85*SIG.D);
+    if (bones.anteE)  bones.anteE.rotateOnWorldAxis(WX, .35*SIG.cE);
+    if (bones.anteD)  bones.anteD.rotateOnWorldAxis(WX, .35*SIG.cD);
+    if (bones.maoE)   bones.maoE.rotateOnWorldAxis(WX, .10*SIG.cE);
+    if (bones.maoD)   bones.maoD.rotateOnWorldAxis(WX, .10*SIG.cD);
 
-    /* respiração do peito */
-    if (bones.spine) bones.spine.rotateOnWorldAxis(WX, Math.sin(t*1.9)*.035);
-    /* troca de peso + giro lento do quadril */
+    /* pernas: flexão visível + tornozelo compensa (joelho pra FRENTE) */
+    if (bones.joelhoE&&bones.peE){
+      bones.joelhoE.rotateOnWorldAxis(WX, .15*SIG.jE);
+      bones.peE.rotateOnWorldAxis(WX, -.12*SIG.jE);
+    }
+    if (bones.joelhoD&&bones.peD){
+      bones.joelhoD.rotateOnWorldAxis(WX, .15*SIG.jD);
+      bones.peD.rotateOnWorldAxis(WX, -.12*SIG.jD);
+    }
+    /* tronco levemente inclinado pra frente (postura viva) */
+    if (bones.hips)  bones.hips.rotateOnWorldAxis(WX, .05);
+    if (bones.spine) bones.spine.rotateOnWorldAxis(WX, Math.sin(t*1.9)*.035+.03);
+    /* troca de peso + quadril */
     if (bones.hips){
       bones.hips.rotateOnWorldAxis(WZ, Math.sin(t*.5)*.04);
       bones.hips.rotateOnWorldAxis(WY, Math.sin(t*.3)*.05);
     }
-    /* cabeça: olha em volta de verdade */
+    /* cabeça olhando em volta */
     if (bones.head){
       bones.head.rotateOnWorldAxis(WY, Math.sin(t*.4)*.22+Math.sin(t*.11)*.15);
       bones.head.rotateOnWorldAxis(WX, Math.sin(t*.8)*.05);
     }
-    /* braços acompanham o corpo */
+    /* braços respiram junto */
     if (bones.bracoE) bones.bracoE.rotateOnWorldAxis(WX, Math.sin(t*1.9+.7)*.035);
     if (bones.bracoD) bones.bracoD.rotateOnWorldAxis(WX, Math.sin(t*1.9)*.035);
   }
